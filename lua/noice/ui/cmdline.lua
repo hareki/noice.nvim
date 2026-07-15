@@ -190,7 +190,7 @@ function M.on_show(event, content, pos, firstc, prompt, indent, level)
 
   if M.confirm_message then
     local message = M.confirm_message --[[@as NoiceMessage]]
-    message:append(prompt)
+    message:append("\n" .. prompt)
     M.confirm_message = nil
     Manager.add(message)
     M._on_hide = function()
