@@ -123,6 +123,8 @@ function M.defaults()
         --- @type NoiceFormat|string
         format_done = "lsp_progress_done",
         throttle = 1000 / 10, -- frequency to update lsp progress message
+        ---@type number|false
+        max_lifetime = false, -- close a progress message after this many ms, even if the server never ends it
         view = "mini",
       },
       override = {

@@ -7,17 +7,32 @@ local Message = require("noice.message")
 local Router = require("noice.message.router")
 local Util = require("noice.util")
 
+local uv = vim.uv or vim.loop
+
 local M = {}
 
 ---@type table<string, NoiceMessage>
 M._progress = {}
 M._running = false
 
+-- ids closed by `max_lifetime` stay muted until the server ends them or reuses the token for a new "begin",
+-- so late reports can't bring the message back
+---@type table<string, true>
+local expired = {}
+
 ---@param data {client_id: integer, params: lsp.ProgressParams}
 function M.progress(data)
   local client_id = data.client_id
   local params = data.params or data.result -- TODO: Remove data.result after nvim 0.10 release
   local id = client_id .. "." .. params.token
+
+  if expired[id] and params.value.kind ~= "begin" then
+    if params.value.kind == "end" then
+      expired[id] = nil
+    end
+    return
+  end
+  expired[id] = nil
 
   local message = M._progress[id]
   if not message then
@@ -31,6 +46,7 @@ function M.progress(data)
       client_id = client_id,
       ---@type string
       client = client and client.name or ("lsp-" .. client_id),
+      started_at = uv.now(),
     }
     M._progress[id] = message
   end
@@ -62,13 +78,16 @@ end
 
 function M._update()
   if not vim.tbl_isempty(M._progress) then
+    local max_lifetime = Config.options.lsp.progress.max_lifetime
     for id, message in pairs(M._progress) do
       local client = vim.lsp.get_client_by_id(message.opts.progress.client_id)
       if not client then
         M.close(id)
-      end
-      if message.opts.progress.kind == "end" then
+      elseif message.opts.progress.kind == "end" then
         Manager.add(Format.format(message, Config.options.lsp.progress.format_done))
+      elseif max_lifetime and uv.now() - message.opts.progress.started_at >= max_lifetime then
+        expired[id] = true
+        M.close(id)
       else
         Manager.add(Format.format(message, Config.options.lsp.progress.format))
       end
