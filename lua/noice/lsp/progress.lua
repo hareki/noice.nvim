@@ -20,11 +20,13 @@ M._running = false
 ---@type table<string, true>
 local expired = {}
 
----@param data {client_id: integer, params: lsp.ProgressParams}
+-- Without a `client_id` the progress is the editor's own (a plugin reporting its work): no client
+-- has to be alive for it, and `params.value.client` names it
+---@param data {client_id?: integer, params: lsp.ProgressParams}
 function M.progress(data)
   local client_id = data.client_id
   local params = data.params or data.result -- TODO: Remove data.result after nvim 0.10 release
-  local id = client_id .. "." .. params.token
+  local id = (client_id or "editor") .. "." .. params.token
 
   if expired[id] and params.value.kind ~= "begin" then
     if params.value.kind == "end" then
@@ -36,16 +38,16 @@ function M.progress(data)
 
   local message = M._progress[id]
   if not message then
-    local client = vim.lsp.get_client_by_id(client_id)
+    local client = client_id and vim.lsp.get_client_by_id(client_id)
     -- should not happen, but it does for some reason
-    if not client then
+    if client_id and not client then
       return
     end
     message = Message("lsp", "progress")
     message.opts.progress = {
       client_id = client_id,
       ---@type string
-      client = client and client.name or ("lsp-" .. client_id),
+      client = client and client.name or params.value.client,
       started_at = uv.now(),
     }
     M._progress[id] = message
@@ -80,8 +82,8 @@ function M._update()
   if not vim.tbl_isempty(M._progress) then
     local max_lifetime = Config.options.lsp.progress.max_lifetime
     for id, message in pairs(M._progress) do
-      local client = vim.lsp.get_client_by_id(message.opts.progress.client_id)
-      if not client then
+      local client_id = message.opts.progress.client_id
+      if client_id and not vim.lsp.get_client_by_id(client_id) then
         M.close(id)
       elseif message.opts.progress.kind == "end" then
         Manager.add(Format.format(message, Config.options.lsp.progress.format_done))
